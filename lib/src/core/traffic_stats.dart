@@ -271,8 +271,12 @@ class TrafficStatsStore extends ChangeNotifier {
       <String, ({int tx, int rx})>{};
   bool _enabled = true;
 
+  /// Whether traffic collection is currently enabled.
+  /// 当前是否启用了流量采集。
   bool get enabled => _enabled;
 
+  /// Enables or disables collection, and optionally clears existing stats when disabling.
+  /// 开启或关闭采集，并可在关闭时清空已有统计数据。
   void setEnabled(bool value, {bool clearOnDisable = false}) {
     if (_enabled == value) {
       return;
@@ -286,12 +290,16 @@ class TrafficStatsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Returns all aggregate items sorted by total traffic in descending order.
+  /// 返回按总流量从高到低排序后的聚合结果列表。
   List<TrafficAggregate> get items {
     final values = _items.values.toList();
     values.sort((a, b) => b.totalBytes.compareTo(a.totalBytes));
     return values;
   }
 
+  /// Clears all collected statistics for the current session.
+  /// 清空当前会话内已采集的全部统计数据。
   void clear() {
     _items.clear();
     _lastApiRequestAt.clear();
@@ -299,10 +307,14 @@ class TrafficStatsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Checks whether a response for the request has already been accounted for.
+  /// 检查当前请求的响应是否已经被统计过。
   bool wasResponseRecorded(RequestOptions options) {
     return options.extra[_responseRecordedKey] == true;
   }
 
+  /// Builds a read-only snapshot containing totals and flattened item data.
+  /// 生成一个只读快照，包含总计信息和扁平化后的条目列表。
   TrafficStatsSnapshot snapshot() {
     final totals = <String, dynamic>{
       'uploadBytes': 0,
@@ -430,10 +442,14 @@ class TrafficStatsStore extends ChangeNotifier {
     );
   }
 
+  /// Exports the current snapshot as formatted JSON text.
+  /// 将当前快照导出为格式化后的 JSON 字符串。
   String exportPrettyJson() {
     return const JsonEncoder.withIndent('  ').convert(snapshot().toJson());
   }
 
+  /// Records one HTTP request and estimates its uploaded bytes.
+  /// 记录一次 HTTP 请求，并估算其上行字节数。
   void recordHttpRequest(RequestOptions options) {
     if (!_enabled) {
       return;
@@ -462,6 +478,8 @@ class TrafficStatsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Records one HTTP response, including estimated download bytes and field stats.
+  /// 记录一次 HTTP 响应，并统计估算下行字节数和字段信息。
   void recordHttpResponse(Response response, {required bool success}) {
     if (!_enabled) {
       return;
@@ -476,6 +494,8 @@ class TrafficStatsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Records a failed HTTP request and merges response data when available.
+  /// 记录一次失败的 HTTP 请求；如果有响应数据也一并合并统计。
   void recordHttpError(DioException error) {
     if (!_enabled) {
       return;
@@ -489,6 +509,8 @@ class TrafficStatsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Records a download with explicit byte size information.
+  /// 在已知精确或外部提供字节数时，记录一次下载流量。
   void recordDownload({
     required TrafficBucket bucket,
     required String url,
@@ -513,6 +535,8 @@ class TrafficStatsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Records an upload with explicit byte size information.
+  /// 在已知精确或外部提供字节数时，记录一次上传流量。
   void recordUpload({
     required TrafficBucket bucket,
     required String label,
@@ -537,6 +561,8 @@ class TrafficStatsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Records one cache hit for the specified traffic item.
+  /// 为指定流量项记录一次缓存命中。
   void recordCacheHit({
     required TrafficBucket bucket,
     required String label,
@@ -556,6 +582,8 @@ class TrafficStatsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Records one cache miss for the specified traffic item.
+  /// 为指定流量项记录一次缓存未命中。
   void recordCacheMiss({
     required TrafficBucket bucket,
     required String label,
@@ -575,6 +603,8 @@ class TrafficStatsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Records one WebSocket message and attributes bytes by direction.
+  /// 记录一条 WebSocket 消息，并按方向计入上下行字节数。
   void recordWebSocketMessage({
     required String channel,
     required int bytes,
@@ -601,6 +631,8 @@ class TrafficStatsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Records short-video playback as count-only because native byte stats are unavailable.
+  /// 由于原生播放器无法暴露字节数，因此短视频播放只记录次数。
   void recordShortVideoPlayback(String url, {String? note}) {
     recordCountOnly(
       bucket: TrafficBucket.shortVideo,
@@ -610,6 +642,8 @@ class TrafficStatsStore extends ChangeNotifier {
     );
   }
 
+  /// Records only the occurrence count for a traffic item when actual bytes are unknown.
+  /// 当无法获知真实字节数时，仅记录该流量项的出现次数。
   void recordCountOnly({
     required TrafficBucket bucket,
     required String label,
@@ -631,6 +665,8 @@ class TrafficStatsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Records RTC traffic using cumulative SDK counters and stores only positive deltas.
+  /// 使用 SDK 的累计字节数记录 RTC 流量，并只累计正向增量。
   void recordRtcStats({
     required String roomId,
     required int txBytes,
@@ -661,6 +697,8 @@ class TrafficStatsStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Estimates request size from URL, headers, and request payload.
+  /// 根据 URL、请求头和请求体估算请求大小。
   static int estimateRequestBytes(RequestOptions options) {
     var total = 0;
 
@@ -696,6 +734,8 @@ class TrafficStatsStore extends ChangeNotifier {
     return total;
   }
 
+  /// Estimates response size from content-length or serialized response data.
+  /// 根据 content-length 或响应体序列化结果估算响应大小。
   static int estimateResponseBytes(Response response) {
     final contentLengthHeader = response.headers.value('content-length');
     if (contentLengthHeader != null) {
@@ -715,6 +755,8 @@ class TrafficStatsStore extends ChangeNotifier {
     return _estimateObjectBytes(data);
   }
 
+  /// Analyzes response payload structure and returns field-count statistics.
+  /// 分析响应数据结构，并返回字段数量统计结果。
   static TrafficFieldStats analyzeFields(Object? data) {
     final totalFieldCount = _countFieldsRecursive(data);
     final topLevelFieldCount = data is Map ? data.length : 0;
@@ -730,6 +772,8 @@ class TrafficStatsStore extends ChangeNotifier {
     );
   }
 
+  /// Recursively counts fields inside maps and iterables.
+  /// 递归统计 Map 或可迭代对象中的字段数量。
   static int _countFieldsRecursive(Object? data) {
     if (data == null) {
       return 0;
@@ -751,6 +795,8 @@ class TrafficStatsStore extends ChangeNotifier {
     return 0;
   }
 
+  /// Counts nested fields and element count for iterable items inside `data`.
+  /// 统计 `data` 中可迭代元素里的嵌套字段数和元素个数。
   static ({int fieldCount, int elementCount}) _analyzeArrayElements(
       Object? data) {
     if (data is! Iterable) {
@@ -767,6 +813,8 @@ class TrafficStatsStore extends ChangeNotifier {
     return (fieldCount: fieldCount, elementCount: elementCount);
   }
 
+  /// Merges field statistics into the target aggregate.
+  /// 将字段统计结果合并到目标聚合项中。
   static void _mergeFieldStats(
     TrafficAggregate aggregate,
     TrafficFieldStats stats,
@@ -778,6 +826,8 @@ class TrafficStatsStore extends ChangeNotifier {
     aggregate.arrayElementCount += stats.arrayElementCount;
   }
 
+  /// Returns the aggregate bucket used for standard HTTP requests.
+  /// 返回标准 HTTP 请求对应的聚合项。
   TrafficAggregate _aggregateForHttp(RequestOptions options) {
     return _aggregate(
       bucket: TrafficBucket.api,
@@ -787,6 +837,8 @@ class TrafficStatsStore extends ChangeNotifier {
     );
   }
 
+  /// Returns an existing aggregate or creates one using bucket, host, and label as key.
+  /// 使用 bucket、host 和 label 作为 key 获取或创建聚合项。
   TrafficAggregate _aggregate({
     required TrafficBucket bucket,
     required String label,
@@ -809,6 +861,8 @@ class TrafficStatsStore extends ChangeNotifier {
     return current;
   }
 
+  /// Estimates header byte size by summing encoded key and value lengths.
+  /// 通过累加请求头键和值的编码长度来估算请求头大小。
   static int _estimateHeaderBytes(Map<String, dynamic> headers) {
     var total = 0;
     headers.forEach((key, value) {
@@ -818,6 +872,8 @@ class TrafficStatsStore extends ChangeNotifier {
     return total;
   }
 
+  /// Estimates object byte size using JSON encoding with a string fallback.
+  /// 优先通过 JSON 编码估算对象大小，失败时退化为字符串长度。
   static int _estimateObjectBytes(Object? data) {
     if (data == null) {
       return 0;
@@ -829,6 +885,8 @@ class TrafficStatsStore extends ChangeNotifier {
     }
   }
 
+  /// Extracts the host part from a URL string.
+  /// 从 URL 字符串中提取 host 部分。
   static String _hostFromUrl(String? value) {
     if (value == null || value.isEmpty) {
       return '';

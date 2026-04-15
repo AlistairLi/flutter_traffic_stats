@@ -1,12 +1,11 @@
 name: flutter_traffic_stats
 description: A Flutter package for collecting and displaying in-app traffic statistics.
-version: 1.0.0
+version: 1.0.1
 repository: https://github.com/AlistairLi/flutter_traffic_stats
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
 
-# Add regular dependencies here.
 dependencies:
   flutter:
     sdk: flutter
