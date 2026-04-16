@@ -142,6 +142,10 @@ class TrafficAggregate {
   /// 额外说明，用于记录限制或上下文。
   String? note;
 
+  /// Optional remote path used by assets such as images, files, and videos.
+  /// 可选的远程路径，用于图片、文件、短视频等资源。
+  String? remoteUrl;
+
   /// Sum of uploaded and downloaded bytes.
   /// 上下行总字节数。
   int get totalBytes => uploadBytes + downloadBytes;
@@ -192,6 +196,7 @@ class TrafficAggregate {
       'arrayElementCount': arrayElementCount,
       'averageArrayElementFieldCount': averageArrayElementFieldCount,
       'note': note,
+      'remoteUrl': remoteUrl,
     };
   }
 }
@@ -435,10 +440,21 @@ class TrafficStatsStore extends ChangeNotifier {
             : ((totals['arrayElementFieldCount'] as int) /
                 (totals['arrayElementCount'] as int));
     totals['byBucket'] = byBucket;
+    final itemList = items.map((item) => item.toJson()).toList();
+    final snapshotBytes = utf8
+        .encode(
+          jsonEncode(<String, dynamic>{
+            'generatedAt': DateTime.now().toIso8601String(),
+            'totals': totals,
+            'items': itemList,
+          }),
+        )
+        .length;
+    totals['snapshotBytes'] = snapshotBytes;
     return TrafficStatsSnapshot(
       generatedAt: DateTime.now(),
       totals: totals,
-      items: items.map((item) => item.toJson()).toList(),
+      items: itemList,
     );
   }
 
@@ -532,6 +548,7 @@ class TrafficStatsStore extends ChangeNotifier {
     aggregate.requestCount += 1;
     aggregate.occurrenceCount += 1;
     aggregate.note = note ?? aggregate.note;
+    aggregate.remoteUrl = url;
     notifyListeners();
   }
 
@@ -638,6 +655,7 @@ class TrafficStatsStore extends ChangeNotifier {
       bucket: TrafficBucket.shortVideo,
       label: url,
       host: _hostFromUrl(url),
+      remoteUrl: url,
       note: note ?? 'video_player native download bytes are not exposed',
     );
   }
@@ -648,6 +666,7 @@ class TrafficStatsStore extends ChangeNotifier {
     required TrafficBucket bucket,
     required String label,
     String host = '',
+    String? remoteUrl,
     String? note,
   }) {
     if (!_enabled) {
@@ -662,6 +681,7 @@ class TrafficStatsStore extends ChangeNotifier {
     aggregate.occurrenceCount += 1;
     aggregate.requestCount += 1;
     aggregate.note = note ?? aggregate.note;
+    aggregate.remoteUrl = remoteUrl ?? aggregate.remoteUrl;
     notifyListeners();
   }
 

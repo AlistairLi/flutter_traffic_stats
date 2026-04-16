@@ -37,11 +37,7 @@ class TrafficStatsPage extends StatelessWidget {
           ),
         ],
       ),
-      body: const SafeArea(
-        child: SingleChildScrollView(
-          child: TrafficStatsWidget(),
-        ),
-      ),
+      body: const SafeArea(child: TrafficStatsWidget()),
     );
   }
 }
