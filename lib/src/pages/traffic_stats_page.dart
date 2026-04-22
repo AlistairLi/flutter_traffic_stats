@@ -14,6 +14,13 @@ class TrafficStatsPage extends StatelessWidget {
         backgroundColor: const Color(0xFF101418),
         scrolledUnderElevation: 0,
         actions: [
+          IconButton(
+            tooltip: 'Report now',
+            onPressed: () {
+              FlutterTrafficStats.reportNow(ignoreDailyLimit: true);
+            },
+            icon: const Icon(Icons.cloud_upload_outlined),
+          ),
           ValueListenableBuilder<bool>(
             valueListenable: FlutterTrafficStats.floatingVisibility,
             builder: (context, isVisible, _) {

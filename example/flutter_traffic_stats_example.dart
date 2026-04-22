@@ -9,6 +9,19 @@ import 'package:flutter_traffic_stats/flutter_traffic_stats.dart';
 void main() {
   projectBootExample();
   directStoreExamples();
+
+
+
+  // traffic_stats_service_example.dart
+  // 启动时，输入落盘和上报实现
+  // NadyTrafficStatsService().configure();
+
+  // 拿到开关配置后设置
+  // NadyTrafficStatsService().setEnabled(_enableTrafficStatistics);
+
+  // 进入首页后主动上报一次流量统计，失败不影响主流程。
+  // unawaited(NadyTrafficStatsService().reportAfterEnterMainPage());
+
 }
 
 /// Source:
@@ -17,9 +30,44 @@ void projectBootExample() {
   // Enable traffic stats at app startup.
   FlutterTrafficStats.setEnabled(true);
 
-  // Disable in production, or clear existing stats when turning it off.
-  // FlutterTrafficStats.setEnabled(!isProdEnv);
-  // FlutterTrafficStats.setEnabled(false, clearOnDisable: true);
+  // Persist the in-memory snapshot every 30 seconds by default.
+  // 默认情况下，每 30 秒保存一次内存中的快照。
+  FlutterTrafficStats.configurePersistence(
+    TrafficStatsPersistenceConfig(
+      onPersist: (snapshot) async {
+        // Caller owns the actual local storage implementation.
+        // 调用方实现本地存储实现。
+
+        // await yourLocalStore.write(snapshot.toJson());
+      },
+    ),
+  );
+
+  // Report every 30 minutes by default, capped at 3 times per day.
+  // 默认情况下每 30 分钟报告一次，每天最多报告 3 次。
+  FlutterTrafficStats.configureReporting(
+    TrafficStatsReportingConfig(
+      onReport: (snapshot, context) async {
+        // Caller owns the actual upload/report implementation.
+        // The callback always receives the latest in-memory snapshot.
+        // 调用方负责实现上传/报告。
+        // 回调函数始终会接收到最新的内存中快照。
+
+        // await yourReporter.report(snapshot.toJson(), context.trigger.name);
+      },
+    ),
+  );
+
+  // Restore persisted data on startup if needed.
+  // 如果需要，会在启动时恢复已保存的数据。
+  // final localJson = await yourLocalStore.read();
+  // if (localJson != null) {
+  //   FlutterTrafficStats.restoreFromJson(localJson);
+  // }
+
+  // Trigger one report actively, for example right after login.
+  // 主动触发一份报告，例如在登录后立即触发。
+  // await FlutterTrafficStats.reportNow();
 }
 
 /// Direct store examples copied from real project integrations.

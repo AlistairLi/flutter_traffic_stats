@@ -5,6 +5,8 @@
 ## Features
 
 - Track session traffic stats for requests and responses
+- Persist in-memory stats through a caller-provided local storage callback
+- Auto-report stats through a caller-provided upload callback
 - View traffic data with a built-in stats page and widget
 - Control stats collection and floating widget visibility in app
 
@@ -35,6 +37,43 @@ Enable or disable traffic collection:
 
 ```dart
 FlutterTrafficStats.setEnabled(true);
+```
+
+Configure persistence and reporting:
+
+```dart
+FlutterTrafficStats.configurePersistence(
+  TrafficStatsPersistenceConfig(
+    // Default is 30 seconds, which balances write frequency and data loss.
+    onPersist: (snapshot) async {
+      await saveTrafficStatsToLocal(snapshot.toJson());
+    },
+  ),
+);
+
+FlutterTrafficStats.configureReporting(
+  TrafficStatsReportingConfig(
+    // Default is every 30 minutes, with at most 3 reports per day.
+    onReport: (snapshot, context) async {
+      await uploadTrafficStats(snapshot.toJson(), trigger: context.trigger.name);
+    },
+  ),
+);
+```
+
+Restore from local storage on app startup:
+
+```dart
+final json = await loadTrafficStatsFromLocal();
+if (json != null) {
+  FlutterTrafficStats.restoreFromJson(json);
+}
+```
+
+Trigger one manual report, for example after login:
+
+```dart
+await FlutterTrafficStats.reportNow();
 ```
 
 Open the built-in stats page:

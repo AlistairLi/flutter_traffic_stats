@@ -34,266 +34,421 @@ class TrafficStatsWidget extends StatelessWidget {
       animation: TrafficStatsStore.I,
       builder: (context, _) {
         final snapshot = TrafficStatsStore.I.snapshot();
-        final items = TrafficStatsStore.I.items.take(maxItems).toList();
+        // final allItems = TrafficStatsStore.I.items.take(maxItems).toList();
+        final allItems = TrafficStatsStore.I.items;
         final totals = snapshot.totals;
         final byBucket = (totals['byBucket'] as Map<String, dynamic>? ?? {})
             .entries
             .toList();
         final snapshotBytes = totals['snapshotBytes'] as int? ?? 0;
         final shouldSuggestClear =
-            snapshotBytes >= _largeStatsWarningThreshold && items.isNotEmpty;
+            snapshotBytes >= _largeStatsWarningThreshold && allItems.isNotEmpty;
 
         if (compact) {
           return _CompactTrafficStatsWidget(totals: totals);
         }
 
-        return Container(
-          color: const Color(0xFF101418),
-          child: RefreshIndicator(
-            color: Colors.white,
-            backgroundColor: const Color(0xFF1A222A),
-            onRefresh: () async {
-              await WidgetsBinding.instance.endOfFrame;
-            },
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16),
-              children: [
-                Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Traffic Stats',
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                    if (showBackToFloatingButton) ...[
-                      _IconActionButton(
-                        tooltip: 'Back to floating',
-                        icon: Icons.close_fullscreen,
-                        onTap: TrafficStatsOverlayController.showCompact,
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    Switch(
-                      value: TrafficStatsStore.I.enabled,
-                      onChanged: (value) {
-                        TrafficStatsStore.I.setEnabled(value);
-                      },
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Total',
-                        value: formatBytes(totals['totalBytes'] as int? ?? 0),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Upload',
-                        value: formatBytes(totals['uploadBytes'] as int? ?? 0),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Download',
-                        value:
-                            formatBytes(totals['downloadBytes'] as int? ?? 0),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Failures',
-                        value: '${totals['failureCount'] ?? 0}',
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Retries',
-                        value: '${totals['retryCount'] ?? 0}',
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Cache Hit',
-                        value: '${totals['cacheHitCount'] ?? 0}',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Fields',
-                        value: '${totals['responseFieldCount'] ?? 0}',
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Avg Fields',
-                        value: _formatDecimal(
-                          totals['averageResponseFieldCount'] as num? ?? 0,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Stats Size',
-                        value: formatBytes(snapshotBytes),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Top Fields',
-                        value: _formatDecimal(
-                          totals['averageTopLevelFieldCount'] as num? ?? 0,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Data Fields',
-                        value: _formatDecimal(
-                          totals['averageDataInnerFieldCount'] as num? ?? 0,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _StatCard(
-                        title: 'Arr Elem Avg',
-                        value: _formatDecimal(
-                          totals['averageArrayElementFieldCount'] as num? ?? 0,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                if (shouldSuggestClear) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0x33F5A623),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: const Color(0x88F5A623),
-                      ),
-                    ),
-                    child: Text(
-                      '统计数据当前约 ${formatBytes(snapshotBytes)}，已偏大；如非排查中，建议点击 “Clear” 清理，避免继续占用内存。',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.white,
-                        fontWeight: FontWeight.w500,
+        return DefaultTabController(
+          length: _trafficTabs.length,
+          child: Container(
+            color: const Color(0xFF101418),
+            child: NestedScrollView(
+              headerSliverBuilder: (context, innerBoxIsScrolled) {
+                return [
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                      child: _ExpandedTrafficStatsHeader(
+                        totals: totals,
+                        byBucket: byBucket,
+                        snapshotBytes: snapshotBytes,
+                        shouldSuggestClear: shouldSuggestClear,
+                        showBackToFloatingButton: showBackToFloatingButton,
                       ),
                     ),
                   ),
+                  SliverPersistentHeader(
+                    pinned: true,
+                    delegate: _TabBarHeaderDelegate(
+                      const _TrafficStatsTabBar(),
+                    ),
+                  ),
+                ];
+              },
+              body: TabBarView(
+                children: [
+                  for (final tab in _trafficTabs)
+                    _TrafficTabList(
+                      bucket: tab.bucket,
+                      maxItems: maxItems,
+                    ),
                 ],
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final entry in byBucket)
-                      _BucketChip(
-                        name: entry.key,
-                        bytes: (entry.value['totalBytes'] as int?) ?? 0,
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _ActionButton(
-                      label: 'Copy JSON',
-                      onTap: () async {
-                        await Clipboard.setData(
-                          ClipboardData(
-                            text: TrafficStatsStore.I.exportPrettyJson(),
-                          ),
-                        );
-                      },
-                    ),
-                    _ActionButton(
-                      label: 'Clear',
-                      onTap: TrafficStatsStore.I.clear,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Top Items (Max $maxItems items)',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                if (items.isEmpty)
-                  const Text(
-                    'No traffic recorded yet',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w400,
-                      color: Colors.white,
-                    ),
-                  ),
-                for (final item in items) _TrafficRow(item: item),
-                const SizedBox(height: 12),
-                const Text(
-                  'Notes',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Enable controls whether traffic is recorded. HTTP/Image/File/WebSocket/OSS upload/Agora bytes are tracked in-session. Short video currently records play count and URL only. Pull down to manually refresh this list.',
-                  maxLines: 10,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w400,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         );
       },
+    );
+  }
+}
+
+class _ExpandedTrafficStatsHeader extends StatelessWidget {
+  const _ExpandedTrafficStatsHeader({
+    required this.totals,
+    required this.byBucket,
+    required this.snapshotBytes,
+    required this.shouldSuggestClear,
+    required this.showBackToFloatingButton,
+  });
+
+  final Map<String, dynamic> totals;
+  final List<MapEntry<String, dynamic>> byBucket;
+  final int snapshotBytes;
+  final bool shouldSuggestClear;
+  final bool showBackToFloatingButton;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Traffic Stats',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+            if (showBackToFloatingButton) ...[
+              _IconActionButton(
+                tooltip: 'Back to floating',
+                icon: Icons.close_fullscreen,
+                onTap: TrafficStatsOverlayController.showCompact,
+              ),
+              const SizedBox(width: 8),
+            ],
+            Switch(
+              value: TrafficStatsStore.I.enabled,
+              onChanged: (value) {
+                TrafficStatsStore.I.setEnabled(value);
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                title: 'Total',
+                value: formatBytes(totals['totalBytes'] as int? ?? 0),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _StatCard(
+                title: 'Upload',
+                value: formatBytes(totals['uploadBytes'] as int? ?? 0),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _StatCard(
+                title: 'Download',
+                value: formatBytes(totals['downloadBytes'] as int? ?? 0),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                title: 'Failures',
+                value: '${totals['failureCount'] ?? 0}',
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _StatCard(
+                title: 'Retries',
+                value: '${totals['retryCount'] ?? 0}',
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _StatCard(
+                title: 'Cache Hit',
+                value: '${totals['cacheHitCount'] ?? 0}',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                title: 'Fields',
+                value: '${totals['responseFieldCount'] ?? 0}',
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _StatCard(
+                title: 'Avg Fields',
+                value: _formatDecimal(
+                  totals['averageResponseFieldCount'] as num? ?? 0,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _StatCard(
+                title: 'Stats Size',
+                value: formatBytes(snapshotBytes),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _StatCard(
+                title: 'Top Fields',
+                value: _formatDecimal(
+                  totals['averageTopLevelFieldCount'] as num? ?? 0,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _StatCard(
+                title: 'Data Fields',
+                value: _formatDecimal(
+                  totals['averageDataInnerFieldCount'] as num? ?? 0,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _StatCard(
+                title: 'Arr Elem Avg',
+                value: _formatDecimal(
+                  totals['averageArrayElementFieldCount'] as num? ?? 0,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (shouldSuggestClear) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0x33F5A623),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: const Color(0x88F5A623),
+              ),
+            ),
+            child: Text(
+              '统计数据当前约 ${formatBytes(snapshotBytes)}，已偏大；如非排查中，建议点击 “Clear” 清理，避免继续占用内存。',
+              style: const TextStyle(
+                fontSize: 12,
+                color: Colors.white,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final bucket in TrafficBucket.values)
+              _BucketChip(
+                name: bucket.name,
+                bytes: _bucketTotalBytes(byBucket, bucket),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _ActionButton(
+              label: 'Copy JSON',
+              onTap: () async {
+                await Clipboard.setData(
+                  ClipboardData(
+                    text: TrafficStatsStore.I.exportPrettyJson(),
+                  ),
+                );
+              },
+            ),
+            _ActionButton(
+              label: 'Clear',
+              onTap: TrafficStatsStore.I.clear,
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        // const Text(
+        //   'Notes',
+        //   style: TextStyle(
+        //     fontSize: 16,
+        //     fontWeight: FontWeight.w600,
+        //     color: Colors.white,
+        //   ),
+        // ),
+        // const SizedBox(height: 6),
+        // const Text(
+        //   'Enable controls whether traffic is recorded. Pull down at the top of each tab to manually refresh that tab list. HTTP/Resource/WebSocket/RTC/Image data is split by tabs below.',
+        //   maxLines: 10,
+        //   style: TextStyle(
+        //     fontSize: 12,
+        //     fontWeight: FontWeight.w400,
+        //     color: Colors.white,
+        //   ),
+        // ),
+      ],
+    );
+  }
+}
+
+class _TrafficStatsTabDefinition {
+  const _TrafficStatsTabDefinition({
+    required this.label,
+    required this.bucket,
+  });
+
+  final String label;
+  final TrafficBucket bucket;
+}
+
+final List<_TrafficStatsTabDefinition> _trafficTabs = TrafficBucket.values
+    .map(
+      (bucket) => _TrafficStatsTabDefinition(
+        label: _bucketTabLabel(bucket),
+        bucket: bucket,
+      ),
+    )
+    .toList(growable: false);
+
+class _TrafficStatsTabBar extends StatelessWidget
+    implements PreferredSizeWidget {
+  const _TrafficStatsTabBar();
+
+  @override
+  Size get preferredSize => const Size.fromHeight(56);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: const Color(0xFF101418),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: TabBar(
+        isScrollable: true,
+        tabAlignment: TabAlignment.start,
+        labelColor: Colors.white,
+        unselectedLabelColor: Colors.white60,
+        indicatorColor: Colors.white,
+        dividerColor: Colors.transparent,
+        tabs: [
+          for (final tab in _trafficTabs)
+            Tab(
+              text: tab.label,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TabBarHeaderDelegate extends SliverPersistentHeaderDelegate {
+  const _TabBarHeaderDelegate(this.child);
+
+  final PreferredSizeWidget child;
+
+  @override
+  double get minExtent => child.preferredSize.height;
+
+  @override
+  double get maxExtent => child.preferredSize.height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return child;
+  }
+
+  @override
+  bool shouldRebuild(covariant _TabBarHeaderDelegate oldDelegate) {
+    return oldDelegate.child != child;
+  }
+}
+
+class _TrafficTabList extends StatelessWidget {
+  const _TrafficTabList({
+    required this.bucket,
+    required this.maxItems,
+  });
+
+  final TrafficBucket bucket;
+  final int maxItems;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = TrafficStatsStore.I.items
+        .where((item) => item.bucket == bucket)
+        .take(maxItems)
+        .toList();
+
+    return RefreshIndicator(
+      color: Colors.white,
+      backgroundColor: const Color(0xFF1A222A),
+      onRefresh: () async {
+        await WidgetsBinding.instance.endOfFrame;
+      },
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        children: [
+          Text(
+            // '${_bucketLabel(bucket)} 列表 (最多 $maxItems 条)',
+            '${_bucketLabel(bucket)} 列表 (${items.length} 条数据)',
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (items.isEmpty)
+            const Text(
+              'No traffic recorded yet',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+                color: Colors.white,
+              ),
+            ),
+          for (final item in items) _TrafficRow(item: item),
+        ],
+      ),
     );
   }
 }
@@ -710,7 +865,21 @@ String _bucketLabel(TrafficBucket bucket) {
     TrafficBucket.rtcAudio => '实时音频',
     TrafficBucket.shortVideo => '短视频',
     TrafficBucket.resource => '资源',
-    TrafficBucket.im => '即时消息',
+    // TrafficBucket.im => '即时消息',
+  };
+}
+
+String _bucketTabLabel(TrafficBucket bucket) {
+  return switch (bucket) {
+    TrafficBucket.api => 'API',
+    TrafficBucket.image => 'Image',
+    TrafficBucket.fileDownload => 'File Down',
+    TrafficBucket.fileUpload => 'File Up',
+    TrafficBucket.webSocket => 'WebSocket',
+    TrafficBucket.rtcAudio => 'RTC Audio',
+    TrafficBucket.shortVideo => 'Short Video',
+    TrafficBucket.resource => 'Resource',
+    // TrafficBucket.im => 'IM',
   };
 }
 
@@ -720,4 +889,16 @@ String _accuracyLabel(TrafficAccuracy accuracy) {
     TrafficAccuracy.estimated => '估算',
     TrafficAccuracy.countOnly => '仅次数',
   };
+}
+
+int _bucketTotalBytes(
+  List<MapEntry<String, dynamic>> byBucket,
+  TrafficBucket bucket,
+) {
+  for (final entry in byBucket) {
+    if (entry.key == bucket.name) {
+      return (entry.value['totalBytes'] as int?) ?? 0;
+    }
+  }
+  return 0;
 }
