@@ -13,6 +13,7 @@
 // /// - 内层负责具体的 MXLogger 初始化与文件读写
 // /// - flutter_mxlogger: ^1.2.15
 // class TrafficStatsService {
+//   static const Duration _reportInterval = Duration(minutes: 30);
 //   static final TrafficStatsService _instance =
 //       TrafficStatsService._internal();
 //
@@ -80,6 +81,9 @@
 //       if (_writeLog == null) {
 //         await _init();
 //       }
+//       if (!await _canTriggerReportNow()) {
+//          return;
+//       }
 //       await FlutterTrafficStats.reportNow();
 //     } catch (e, s) {
 //       _logError('reportAfterEnterMainPage', e, s);
@@ -139,6 +143,7 @@
 //
 //     await writeLog.deleteSnapshot();
 //     FlutterTrafficStats.store.consumeReportedSnapshot(reportedSnapshot);
+//     await _updateLastReportAt();
 //
 //     writeLog.infoLog(
 //       'report traffic stats trigger=${context.trigger.name} count=${context.dailyReportCount}',
@@ -159,6 +164,25 @@
 //       msg: 'NadyTrafficStatsService.$action error',
 //       exception: error,
 //       stackTrace: stackTrace,
+//     );
+//   }
+//
+//   Future<bool> _canTriggerReportNow() async {
+//     final lastReportMillis = await SpUtil().getInt(
+//       SpKeys.trafficStatsLastReportAt,
+//       0,
+//     );
+//     if (lastReportMillis <= 0) {
+//       return true;
+//     }
+//     final lastReportAt = DateTime.fromMillisecondsSinceEpoch(lastReportMillis);
+//     return DateTime.now().difference(lastReportAt) >= _reportInterval;
+//   }
+//
+//   Future<void> _updateLastReportAt() {
+//     return SpUtil().setInt(
+//       SpKeys.trafficStatsLastReportAt,
+//       DateTime.now().millisecondsSinceEpoch,
 //     );
 //   }
 // }
