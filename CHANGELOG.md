@@ -9,3 +9,7 @@
 ## 1.0.2
 
 - Optimization function.
+
+## 1.0.3
+
+- Drop the disk and report.
