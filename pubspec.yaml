@@ -1,4 +1,4 @@
-name: flutter_traffic_stats
+name: flutter_traffic_stats_plus
 description: A Flutter package for collecting and displaying in-app traffic statistics.
 version: 1.0.3
 repository: https://github.com/AlistairLi/flutter_traffic_stats

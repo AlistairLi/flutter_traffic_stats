@@ -12,4 +12,4 @@
 
 ## 1.0.3
 
-- Drop the disk and report.
+- Fix bug.

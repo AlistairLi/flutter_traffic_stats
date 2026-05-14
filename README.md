@@ -30,7 +30,7 @@ flutter pub get
 Import the package:
 
 ```dart
-import 'package:flutter_traffic_stats/flutter_traffic_stats.dart';
+import 'package:flutter_traffic_stats/flutter_traffic_stats_plus.dart';
 ```
 
 Enable or disable traffic collection:
@@ -56,7 +56,10 @@ FlutterTrafficStats.configureReporting(
     // Default is every 30 minutes, with at most 3 reports per day.
     onReport: (snapshot, context) async {
       await uploadTrafficStats(snapshot.toJson(), trigger: context.trigger.name);
+      return true;
     },
+    loadReportQuota: loadTrafficStatsReportQuota,
+    saveReportQuota: saveTrafficStatsReportQuota,
   ),
 );
 ```

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_traffic_stats/flutter_traffic_stats.dart';
+
+import '../../flutter_traffic_stats_plus.dart';
 
 /// A page that displays traffic stats.
 class TrafficStatsPage extends StatelessWidget {

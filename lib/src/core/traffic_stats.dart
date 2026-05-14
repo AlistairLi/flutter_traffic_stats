@@ -4,6 +4,13 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+String formatQuotaDay(DateTime value) {
+  final date = DateTime(value.year, value.month, value.day);
+  final month = date.month.toString().padLeft(2, '0');
+  final day = date.day.toString().padLeft(2, '0');
+  return '${date.year}-$month-$day';
+}
+
 /// High-level traffic source categories used for aggregation.
 enum TrafficBucket {
   /// Standard HTTP/HTTPS API traffic.
@@ -320,9 +327,16 @@ typedef TrafficStatsPersistCallback = FutureOr<void> Function(
     TrafficStatsSnapshot snapshot);
 
 /// 宿主侧实现的上报回调类型。
-typedef TrafficStatsReportCallback = FutureOr<void> Function(
+typedef TrafficStatsReportCallback = FutureOr<bool> Function(
   TrafficStatsSnapshot snapshot,
   TrafficStatsReportContext context,
+);
+
+typedef TrafficStatsLoadReportQuotaCallback = FutureOr<TrafficStatsReportQuota?>
+    Function();
+
+typedef TrafficStatsSaveReportQuotaCallback = FutureOr<void> Function(
+  TrafficStatsReportQuota quota,
 );
 
 /// 上报触发来源。
@@ -352,6 +366,30 @@ class TrafficStatsReportContext {
   final int maxReportsPerDay;
 }
 
+class TrafficStatsReportQuota {
+  const TrafficStatsReportQuota({
+    required this.quotaDay,
+    required this.reportCountToday,
+  });
+
+  factory TrafficStatsReportQuota.fromJson(Map<String, dynamic> json) {
+    return TrafficStatsReportQuota(
+      quotaDay: DateTime.parse(json['quotaDay'] as String),
+      reportCountToday: json['reportCountToday'] as int? ?? 0,
+    );
+  }
+
+  final DateTime quotaDay;
+  final int reportCountToday;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'quotaDay': formatQuotaDay(quotaDay),
+      'reportCountToday': reportCountToday,
+    };
+  }
+}
+
 /// 落盘调度配置。
 /// 用于声明宿主侧的落盘回调和定时落盘间隔。
 class TrafficStatsPersistenceConfig {
@@ -377,6 +415,8 @@ class TrafficStatsReportingConfig {
     required this.onReport,
     this.interval = const Duration(minutes: 30),
     this.maxReportsPerDay = 3,
+    this.loadReportQuota,
+    this.saveReportQuota,
   })  : assert(interval.inMicroseconds > 0),
         assert(maxReportsPerDay > 0);
 
@@ -389,6 +429,14 @@ class TrafficStatsReportingConfig {
   /// 具体怎么上报由宿主实现。
   /// 回调会拿到当前内存快照，宿主可在本地文件缺失时直接兜底上报这份数据。
   final TrafficStatsReportCallback onReport;
+
+  /// Loads the persisted daily report quota before checking the daily limit.
+  /// 读取宿主侧持久化的当日上报配额。
+  final TrafficStatsLoadReportQuotaCallback? loadReportQuota;
+
+  /// Saves the daily report quota after a successful report.
+  /// 成功上报后保存当日上报配额。
+  final TrafficStatsSaveReportQuotaCallback? saveReportQuota;
 }
 
 /// In-memory store for all traffic statistics collected in the current session.
@@ -443,11 +491,14 @@ class TrafficStatsStore extends ChangeNotifier {
   /// 当前自然日内已经成功上报的次数。
   int _reportCountToday = 0;
 
+  /// 当前内存中的上报配额是否已经尝试从宿主持久化读取。
+  bool _reportQuotaLoaded = false;
+
   /// 当前时间提供者，默认取系统时间，测试时可替换。
   DateTime Function() _now = DateTime.now;
 
   /// 当前采集开关状态。
-  bool _enabled = true;
+  bool _enabled = false;
 
   /// Whether traffic collection is currently enabled.
   /// 当前是否启用了流量采集。
@@ -563,6 +614,7 @@ class TrafficStatsStore extends ChangeNotifier {
     _reportingTimer = null;
     _reportQuotaDay = null;
     _reportCountToday = 0;
+    _reportQuotaLoaded = false;
     if (config == null) {
       return;
     }
@@ -589,6 +641,7 @@ class TrafficStatsStore extends ChangeNotifier {
     if (config == null) {
       return false;
     }
+    await _loadReportQuotaIfNeeded(config);
     _resetReportQuotaIfNeeded();
     if (!ignoreDailyLimit && _reportCountToday >= config.maxReportsPerDay) {
       return false;
@@ -602,7 +655,7 @@ class TrafficStatsStore extends ChangeNotifier {
     try {
       final nextCount =
           ignoreDailyLimit ? _reportCountToday : _reportCountToday + 1;
-      await config.onReport(
+      final didReport = await config.onReport(
         snapshot(),
         TrafficStatsReportContext(
           trigger: trigger,
@@ -611,8 +664,12 @@ class TrafficStatsStore extends ChangeNotifier {
           maxReportsPerDay: config.maxReportsPerDay,
         ),
       );
+      if (!didReport) {
+        return false;
+      }
       if (!ignoreDailyLimit) {
         _reportCountToday = nextCount;
+        await _saveReportQuota(config);
       }
       return true;
     } finally {
@@ -1245,12 +1302,48 @@ class TrafficStatsStore extends ChangeNotifier {
   /// 跨天后重置每日上报计数。
   void _resetReportQuotaIfNeeded() {
     final now = _now();
-    final today = DateTime(now.year, now.month, now.day);
+    final today = _dateOnly(now);
     if (_reportQuotaDay == today) {
       return;
     }
     _reportQuotaDay = today;
     _reportCountToday = 0;
+  }
+
+  Future<void> _loadReportQuotaIfNeeded(
+      TrafficStatsReportingConfig config) async {
+    if (_reportQuotaLoaded) {
+      return;
+    }
+    final loadReportQuota = config.loadReportQuota;
+    if (loadReportQuota == null) {
+      _reportQuotaLoaded = true;
+      return;
+    }
+    final quota = await loadReportQuota();
+    _reportQuotaLoaded = true;
+    if (quota == null) {
+      return;
+    }
+    _reportQuotaDay = _dateOnly(quota.quotaDay);
+    _reportCountToday = quota.reportCountToday < 0 ? 0 : quota.reportCountToday;
+  }
+
+  Future<void> _saveReportQuota(TrafficStatsReportingConfig config) async {
+    final saveReportQuota = config.saveReportQuota;
+    if (saveReportQuota == null || _reportQuotaDay == null) {
+      return;
+    }
+    await saveReportQuota(
+      TrafficStatsReportQuota(
+        quotaDay: _reportQuotaDay!,
+        reportCountToday: _reportCountToday,
+      ),
+    );
+  }
+
+  static DateTime _dateOnly(DateTime value) {
+    return DateTime(value.year, value.month, value.day);
   }
 
   /// 将恢复出来的聚合项合并到现有聚合项中。

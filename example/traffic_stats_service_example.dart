@@ -2,8 +2,9 @@
 // import 'dart:convert';
 // import 'dart:io';
 //
+// import 'package:fext_aliyun_oss/fext_aliyun_oss.dart';
 // import 'package:flutter_mxlogger/flutter_mxlogger.dart';
-// import 'package:flutter_traffic_stats/flutter_traffic_stats.dart';
+// import 'package:flutter_traffic_stats/flutter_traffic_stats_plus.dart';
 // import 'package:path/path.dart' as p;
 // import 'package:path_provider/path_provider.dart';
 //
@@ -14,8 +15,9 @@
 // /// - flutter_mxlogger: ^1.2.15
 // class TrafficStatsService {
 //   static const Duration _reportInterval = Duration(minutes: 30);
+//
 //   static final TrafficStatsService _instance =
-//       TrafficStatsService._internal();
+//   TrafficStatsService._internal();
 //
 //   factory TrafficStatsService() => _instance;
 //
@@ -23,6 +25,8 @@
 //
 //   _TrafficStatsWriteLog? _writeLog;
 //   bool _configured = false;
+//
+//   bool get _enabled => FlutterTrafficStats.isEnabled;
 //
 //   /// 懒初始化底层存储实现。
 //   Future<_TrafficStatsWriteLog> _init() async {
@@ -47,13 +51,18 @@
 //       TrafficStatsReportingConfig(
 //         onReport: (snapshot, context) =>
 //             TrafficStatsService().reportSnapshot(snapshot, context),
+//         loadReportQuota: TrafficStatsService().loadReportQuota,
+//         saveReportQuota: TrafficStatsService().saveReportQuota,
 //       ),
 //     );
 //   }
 //
 //   /// 根据远端开关控制流量统计是否开启。
 //   void setEnabled(bool enabled) {
-//     FlutterTrafficStats.setEnabled(enabled);
+//     FlutterTrafficStats.setEnabled(enabled, clearOnDisable: true);
+//     if (!enabled) {
+//       unawaited(_deleteSnapshotIfNeeded());
+//     }
 //   }
 //
 //   /// 启动时从本地恢复上次落盘的统计快照。
@@ -78,11 +87,14 @@
 //   /// 进入首页后主动触发一次上报。
 //   Future<void> reportAfterEnterMainPage() async {
 //     try {
+//       if (!_enabled) {
+//         return;
+//       }
 //       if (_writeLog == null) {
 //         await _init();
 //       }
 //       if (!await _canTriggerReportNow()) {
-//          return;
+//         return;
 //       }
 //       await FlutterTrafficStats.reportNow();
 //     } catch (e, s) {
@@ -102,10 +114,13 @@
 //   }
 //
 //   /// 执行一次真正的上报逻辑，优先读取本地快照，没有再回退到内存快照。
-//   Future<void> reportSnapshot(
-//     TrafficStatsSnapshot memorySnapshot,
-//     TrafficStatsReportContext context,
-//   ) async {
+//   Future<bool> reportSnapshot(
+//       TrafficStatsSnapshot memorySnapshot,
+//       TrafficStatsReportContext context,
+//       ) async {
+//     if (!_enabled) {
+//       return false;
+//     }
 //     final writeLog = _writeLog ?? await _init();
 //     final persistedJson = await writeLog.readSnapshotJson();
 //     final reportedSnapshot = persistedJson != null
@@ -117,28 +132,34 @@
 //       Logger.network(
 //           event: NetEvents.failedUploadParamsFailed,
 //           msg:
-//               'Failed to obtain the upload parameters, on report traffic, stats, uploadModel == null.');
-//       return;
+//           'Failed to obtain the upload parameters, on report traffic, stats, uploadModel == null.');
+//       return false;
+//     }
+//     if (!_enabled) {
+//       return false;
 //     }
 //
 //     final payload = persistedJson ?? memorySnapshot.toJson();
 //     final payloadBytes = utf8.encode(jsonEncode(payload));
 //     final uploaded = await TrafficAwareOssUploader.putBytesObject(
-//       endpoint: uploadModel.endpoint,
-//       accessKeyId: uploadModel.accessKeyId,
-//       accessKeySecret: uploadModel.accessKeySecret,
-//       securityToken: uploadModel.securityToken,
-//       bucketName: uploadModel.bucket,
-//       uploadPath: uploadModel.path,
-//       uploadBytes: payloadBytes,
-//     );
+//         endpoint: uploadModel.endpoint,
+//         accessKeyId: uploadModel.accessKeyId,
+//         accessKeySecret: uploadModel.accessKeySecret,
+//         securityToken: uploadModel.securityToken,
+//         bucketName: uploadModel.bucket,
+//         uploadPath: uploadModel.path,
+//         uploadBytes: payloadBytes,
+//         label: 'traffic_stats_upload\n${uploadModel.path}');
 //     if (!uploaded) {
-//       throw StateError('traffic stats upload to oss failed');
+//       return false;
+//     }
+//     if (!_enabled) {
+//       return false;
 //     }
 //
 //     final saved = await CommonApi.of.uploadLog(uploadModel.path);
 //     if (!saved) {
-//       throw StateError('traffic stats upload callback failed');
+//       return false;
 //     }
 //
 //     await writeLog.deleteSnapshot();
@@ -149,6 +170,40 @@
 //       'report traffic stats trigger=${context.trigger.name} count=${context.dailyReportCount}',
 //       name: 'traffic_stats',
 //       tag: 'report',
+//     );
+//     return true;
+//   }
+//
+//   Future<TrafficStatsReportQuota?> loadReportQuota() async {
+//     final day = await SpUtil().getString(
+//       SpKeys.trafficStatsReportQuotaDay,
+//       '',
+//     );
+//     if (day.isEmpty) {
+//       return null;
+//     }
+//     final quotaDay = DateTime.tryParse(day);
+//     if (quotaDay == null) {
+//       return null;
+//     }
+//     final count = await SpUtil().getInt(
+//       SpKeys.trafficStatsReportCountToday,
+//       0,
+//     );
+//     return TrafficStatsReportQuota(
+//       quotaDay: quotaDay,
+//       reportCountToday: count,
+//     );
+//   }
+//
+//   Future<void> saveReportQuota(TrafficStatsReportQuota quota) async {
+//     await SpUtil().setString(
+//       SpKeys.trafficStatsReportQuotaDay,
+//       _formatQuotaDay(quota.quotaDay),
+//     );
+//     await SpUtil().setInt(
+//       SpKeys.trafficStatsReportCountToday,
+//       quota.reportCountToday,
 //     );
 //   }
 //
@@ -161,7 +216,7 @@
 //     );
 //     Logger.network(
 //       event: NetEvents.apiRequestFailed,
-//       msg: 'NadyTrafficStatsService.$action error',
+//       msg: 'TrafficStatsService.$action error',
 //       exception: error,
 //       stackTrace: stackTrace,
 //     );
@@ -184,6 +239,22 @@
 //       SpKeys.trafficStatsLastReportAt,
 //       DateTime.now().millisecondsSinceEpoch,
 //     );
+//   }
+//
+//   Future<void> _deleteSnapshotIfNeeded() async {
+//     try {
+//       final writeLog = _writeLog ?? await _init();
+//       await writeLog.deleteSnapshot();
+//     } catch (e, s) {
+//       _logError('deleteSnapshotIfNeeded', e, s);
+//     }
+//   }
+//
+//   static String _formatQuotaDay(DateTime value) {
+//     final date = DateTime(value.year, value.month, value.day);
+//     final month = date.month.toString().padLeft(2, '0');
+//     final day = date.day.toString().padLeft(2, '0');
+//     return '${date.year}-$month-$day';
 //   }
 // }
 //
@@ -208,7 +279,7 @@
 // }
 //
 // class _MXTrafficStatsWriteLog extends _TrafficStatsWriteLog {
-//   static const String _nameSpace = 'com.nadychat.traffic.stats';
+//   static const String _nameSpace = 'com.chat.traffic.stats';
 //   static const String _snapshotFileName = 'traffic_stats_snapshot.json';
 //
 //   MXLogger? logger;

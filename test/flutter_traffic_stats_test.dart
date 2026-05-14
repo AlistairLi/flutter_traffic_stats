@@ -1,11 +1,12 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_traffic_stats/flutter_traffic_stats.dart';
+import 'package:flutter_traffic_stats_plus/flutter_traffic_stats_plus.dart';
 
 void main() {
   final store = TrafficStatsStore.I;
   DateTime now = DateTime(2026, 1, 1, 9);
 
   setUp(() {
+    now = DateTime(2026, 1, 1, 9);
     store.clear();
     store.setEnabled(true);
     store.configurePersistence(null);
@@ -78,6 +79,7 @@ void main() {
         maxReportsPerDay: 3,
         onReport: (snapshot, context) {
           reports.add(context);
+          return true;
         },
       ),
     );
@@ -112,6 +114,7 @@ void main() {
         onReport: (snapshot, context) {
           reportedSnapshot = snapshot;
           reportedContext = context;
+          return true;
         },
       ),
     );
@@ -169,6 +172,7 @@ void main() {
       TrafficStatsReportingConfig(
         onReport: (snapshot, context) {
           reportCount += 1;
+          return true;
         },
       ),
     );
@@ -184,6 +188,66 @@ void main() {
 
     expect(didReport, isFalse);
     expect(reportCount, 0);
+  });
+
+  test('report quota is restored from caller persistence', () async {
+    var savedQuota = TrafficStatsReportQuota(
+      quotaDay: DateTime(2026, 1, 1),
+      reportCountToday: 2,
+    );
+    final reports = <TrafficStatsReportContext>[];
+    store.configureReporting(
+      TrafficStatsReportingConfig(
+        maxReportsPerDay: 3,
+        loadReportQuota: () => savedQuota,
+        saveReportQuota: (quota) => savedQuota = quota,
+        onReport: (snapshot, context) {
+          reports.add(context);
+          return true;
+        },
+      ),
+    );
+
+    expect(await store.reportNow(), isTrue);
+    expect(await store.reportNow(), isFalse);
+    expect(reports.map((item) => item.dailyReportCount), [3]);
+    expect(savedQuota.reportCountToday, 3);
+
+    now = DateTime(2026, 1, 2, 9);
+    store.configureReporting(
+      TrafficStatsReportingConfig(
+        maxReportsPerDay: 3,
+        loadReportQuota: () => savedQuota,
+        saveReportQuota: (quota) => savedQuota = quota,
+        onReport: (snapshot, context) {
+          reports.add(context);
+          return true;
+        },
+      ),
+    );
+
+    expect(await store.reportNow(), isTrue);
+    expect(reports.last.dailyReportCount, 1);
+    expect(savedQuota.reportCountToday, 1);
+  });
+
+  test('failed report callback does not consume daily quota', () async {
+    var shouldSucceed = false;
+    final reports = <TrafficStatsReportContext>[];
+    store.configureReporting(
+      TrafficStatsReportingConfig(
+        maxReportsPerDay: 1,
+        onReport: (snapshot, context) {
+          reports.add(context);
+          return shouldSucceed;
+        },
+      ),
+    );
+
+    expect(await store.reportNow(), isFalse);
+    shouldSucceed = true;
+    expect(await store.reportNow(), isTrue);
+    expect(reports.map((item) => item.dailyReportCount), [1, 1]);
   });
 
   test('consume reported snapshot removes uploaded in-memory stats only', () {

@@ -1,4 +1,4 @@
-import 'package:flutter_traffic_stats/flutter_traffic_stats.dart';
+import 'package:flutter_traffic_stats_plus/flutter_traffic_stats_plus.dart';
 
 /// This file collects every traffic-stats usage pattern found in the host app.
 ///
@@ -10,8 +10,6 @@ void main() {
   projectBootExample();
   directStoreExamples();
 
-
-
   // traffic_stats_service_example.dart
   // 启动时，输入落盘和上报实现
   // NadyTrafficStatsService().configure();
@@ -21,7 +19,6 @@ void main() {
 
   // 进入首页后主动上报一次流量统计，失败不影响主流程。
   // unawaited(NadyTrafficStatsService().reportAfterEnterMainPage());
-
 }
 
 /// Source:
@@ -54,6 +51,7 @@ void projectBootExample() {
         // 回调函数始终会接收到最新的内存中快照。
 
         // await yourReporter.report(snapshot.toJson(), context.trigger.name);
+        return true;
       },
     ),
   );
