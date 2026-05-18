@@ -21,6 +21,11 @@ class FlutterTrafficStats {
     store.setEnabled(enabled, clearOnDisable: clearOnDisable);
   }
 
+  /// 设置调用方提供的 App 版本，后续快照会写入顶层 appVersion 字段。
+  static void setAppVersion(String? appVersion) {
+    store.setAppVersion(appVersion);
+  }
+
   /// 配置宿主侧的本地落盘实现。
   static void configurePersistence(TrafficStatsPersistenceConfig? config) {
     store.configurePersistence(config);

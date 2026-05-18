@@ -11,8 +11,22 @@ void main() {
     store.setEnabled(true);
     store.configurePersistence(null);
     store.configureReporting(null);
+    store.setAppVersion(null);
     store.debugSetNow(() => now);
     store.restoreFromSnapshot(store.snapshot());
+  });
+
+  test('snapshot includes caller-provided app version', () {
+    FlutterTrafficStats.setAppVersion('  1.2.3+45  ');
+
+    final snapshot = store.snapshot();
+    final json = snapshot.toJson();
+    final restored = TrafficStatsSnapshot.fromJson(json);
+
+    expect(snapshot.appVersion, '1.2.3+45');
+    expect(json['appVersion'], '1.2.3+45');
+    expect(restored.appVersion, '1.2.3+45');
+    expect(json.keys.toList().take(2), ['generatedAt', 'appVersion']);
   });
 
   test('snapshot includes estimated stats size', () {

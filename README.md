@@ -37,6 +37,7 @@ Enable or disable traffic collection:
 
 ```dart
 FlutterTrafficStats.setEnabled(true);
+FlutterTrafficStats.setAppVersion('1.0.0+100');
 ```
 
 Configure persistence and reporting:

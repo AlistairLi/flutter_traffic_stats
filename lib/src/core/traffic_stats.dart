@@ -280,6 +280,7 @@ class TrafficFieldStats {
 class TrafficStatsSnapshot {
   TrafficStatsSnapshot({
     required this.generatedAt,
+    required this.appVersion,
     required this.totals,
     required this.items,
   });
@@ -287,6 +288,10 @@ class TrafficStatsSnapshot {
   /// Time when the snapshot was generated.
   /// 快照生成时间。
   final DateTime generatedAt;
+
+  /// Caller-provided app version attached to this snapshot.
+  /// 调用方提供的 App 版本。
+  final String? appVersion;
 
   /// Global totals summary.
   /// 全局汇总统计。
@@ -301,6 +306,7 @@ class TrafficStatsSnapshot {
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
       'generatedAt': generatedAt.toIso8601String(),
+      'appVersion': appVersion,
       'totals': totals,
       'items': items,
     };
@@ -312,6 +318,7 @@ class TrafficStatsSnapshot {
     return TrafficStatsSnapshot(
       generatedAt: DateTime.tryParse(json['generatedAt'] as String? ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0),
+      appVersion: json['appVersion'] as String?,
       totals: Map<String, dynamic>.from(
         json['totals'] as Map? ?? const <String, dynamic>{},
       ),
@@ -400,7 +407,7 @@ class TrafficStatsPersistenceConfig {
 
   /// 30 seconds is a pragmatic default for mobile buffering:
   /// it avoids excessive write amplification while bounding loss on crash.
-  /// 默认 30 秒落盘一次。
+  /// 默认 30 秒落盘一次。并检查是否有脏数据需要落盘；无变更时不会写文件
   /// 这个频率能兼顾磁盘写入次数和异常退出时的数据损失窗口。
   final Duration interval;
 
@@ -500,9 +507,16 @@ class TrafficStatsStore extends ChangeNotifier {
   /// 当前采集开关状态。
   bool _enabled = false;
 
+  /// 调用方提供的 App 版本，会写入快照顶层字段。
+  String? _appVersion;
+
   /// Whether traffic collection is currently enabled.
   /// 当前是否启用了流量采集。
   bool get enabled => _enabled;
+
+  /// Caller-provided app version included in generated snapshots.
+  /// 当前快照中携带的调用方 App 版本。
+  String? get appVersion => _appVersion;
 
   /// Enables or disables collection, and optionally clears existing stats when disabling.
   /// 开启或关闭采集，并可在关闭时清空已有统计数据。
@@ -517,6 +531,19 @@ class TrafficStatsStore extends ChangeNotifier {
       _rtcTotals.clear();
       _markDirty();
     }
+    notifyListeners();
+  }
+
+  /// Sets the caller-provided app version included in generated snapshots.
+  /// 设置调用方提供的 App 版本，后续快照会写入顶层 appVersion 字段。
+  void setAppVersion(String? value) {
+    final next = value?.trim();
+    final normalized = next == null || next.isEmpty ? null : next;
+    if (_appVersion == normalized) {
+      return;
+    }
+    _appVersion = normalized;
+    _markDirty();
     notifyListeners();
   }
 
@@ -691,6 +718,7 @@ class TrafficStatsStore extends ChangeNotifier {
   /// Builds a read-only snapshot containing totals and flattened item data.
   /// 生成一个只读快照，包含总计信息和扁平化后的条目列表。
   TrafficStatsSnapshot snapshot() {
+    final generatedAt = _now();
     final totals = <String, dynamic>{
       'uploadBytes': 0,
       'downloadBytes': 0,
@@ -814,7 +842,8 @@ class TrafficStatsStore extends ChangeNotifier {
     final snapshotBytes = utf8
         .encode(
           jsonEncode(<String, dynamic>{
-            'generatedAt': DateTime.now().toIso8601String(),
+            'generatedAt': generatedAt.toIso8601String(),
+            'appVersion': _appVersion,
             'totals': totals,
             'items': itemList,
           }),
@@ -822,7 +851,8 @@ class TrafficStatsStore extends ChangeNotifier {
         .length;
     totals['snapshotBytes'] = snapshotBytes;
     return TrafficStatsSnapshot(
-      generatedAt: DateTime.now(),
+      generatedAt: generatedAt,
+      appVersion: _appVersion,
       totals: totals,
       items: itemList,
     );

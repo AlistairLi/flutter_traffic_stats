@@ -26,6 +26,7 @@ void main() {
 void projectBootExample() {
   // Enable traffic stats at app startup.
   FlutterTrafficStats.setEnabled(true);
+  FlutterTrafficStats.setAppVersion('1.0.0+100');
 
   // Persist the in-memory snapshot every 30 seconds by default.
   // 默认情况下，每 30 秒保存一次内存中的快照。
