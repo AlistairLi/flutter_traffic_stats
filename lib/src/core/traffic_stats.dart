@@ -397,6 +397,211 @@ class TrafficStatsReportQuota {
   }
 }
 
+/// 诊断明细采集配置。
+///
+/// 与原有累计统计开关独立：只有宿主显式配置诊断时才会保留事件级明细。
+class TrafficStatsDiagnosisConfig {
+  const TrafficStatsDiagnosisConfig({
+    required this.enabled,
+    required this.startedAt,
+    required this.expiresAt,
+    this.maxEvents = 5000,
+    this.maxCacheBytes = 10 * 1024 * 1024,
+  });
+
+  /// 是否启用诊断明细采集。
+  final bool enabled;
+
+  /// 诊断窗口开始时间，早于该时间的事件不会进入 ring buffer。
+  final DateTime startedAt;
+
+  /// 诊断窗口结束时间，晚于该时间的事件不会进入 ring buffer。
+  final DateTime expiresAt;
+
+  /// 诊断事件数量上限，超过后淘汰最早事件。
+  final int maxEvents;
+
+  /// 诊断事件内存估算上限，超过后淘汰最早事件。
+  final int maxCacheBytes;
+}
+
+/// 指定时间窗口内的 Flutter 侧流量诊断快照。
+///
+/// 该快照面向排查问题：包含总量、bucket 汇总和按流量排序的 topItems。
+class TrafficStatsDiagnosisSnapshot {
+  const TrafficStatsDiagnosisSnapshot({
+    required this.startTime,
+    required this.endTime,
+    required this.generatedAt,
+    required this.totals,
+    required this.byBucket,
+    required this.topItems,
+    required this.eventsCount,
+  });
+
+  /// 查询窗口开始时间。
+  final DateTime startTime;
+
+  /// 查询窗口结束时间。
+  final DateTime endTime;
+
+  /// 快照生成时间。
+  final DateTime generatedAt;
+
+  /// 窗口内整体流量、次数、失败、重试等汇总。
+  final Map<String, dynamic> totals;
+
+  /// 按 TrafficBucket 聚合后的诊断汇总。
+  final Map<String, Map<String, dynamic>> byBucket;
+
+  /// 按总流量降序排列的来源列表，用于快速定位高流量来源。
+  final List<Map<String, dynamic>> topItems;
+
+  /// 参与聚合的原始诊断事件数量。
+  final int eventsCount;
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'startMillis': startTime.millisecondsSinceEpoch,
+      'endMillis': endTime.millisecondsSinceEpoch,
+      'generatedAtMillis': generatedAt.millisecondsSinceEpoch,
+      'totals': totals,
+      'byBucket': byBucket,
+      'topItems': topItems,
+      'eventsCount': eventsCount,
+    };
+  }
+}
+
+/// 一条事件级诊断记录。
+///
+/// 只保存排查必需字段，不保存请求体、响应体、token 等敏感信息。
+class _TrafficDiagnosisEvent {
+  _TrafficDiagnosisEvent({
+    required this.timestampMillis,
+    required this.bucket,
+    required this.label,
+    required this.host,
+    required this.accuracy,
+    this.source = '',
+    this.uploadBytes = 0,
+    this.downloadBytes = 0,
+    this.requestCount = 0,
+    this.failureCount = 0,
+    this.retryCount = 0,
+    this.rapidRepeatCount = 0,
+    this.cacheHitCount = 0,
+    this.cacheMissCount = 0,
+    this.responseFieldCount = 0,
+    this.durationMillis,
+    this.statusCode,
+    this.normalizedUrl,
+    this.note,
+  });
+
+  /// 事件发生时间，毫秒时间戳。
+  final int timestampMillis;
+
+  /// 流量来源大类，例如 api、resource、webSocket、rtcAudio。
+  final TrafficBucket bucket;
+
+  /// 可读来源标识，例如接口 path、资源 label、长连 channel、房间 ID。
+  final String label;
+
+  /// 关联域名；无域名的来源保持空字符串。
+  final String host;
+
+  /// 字节统计精度，用于区分精确、估算和仅计数。
+  final TrafficAccuracy accuracy;
+
+  /// 记录来源，例如 dio、download、upload、webSocket、rtc。
+  final String source;
+
+  /// 本事件上行字节数。
+  final int uploadBytes;
+
+  /// 本事件下行字节数。
+  final int downloadBytes;
+
+  /// 本事件代表的请求、消息或采样次数。
+  final int requestCount;
+
+  /// 本事件失败次数。
+  final int failureCount;
+
+  /// 本事件重试次数。
+  final int retryCount;
+
+  /// 短时间重复请求次数，用于识别异常轮询或重复触发。
+  final int rapidRepeatCount;
+
+  /// 缓存命中次数。
+  final int cacheHitCount;
+
+  /// 缓存未命中次数。
+  final int cacheMissCount;
+
+  /// 响应体字段数量，用于识别大结构响应。
+  final int responseFieldCount;
+
+  /// 请求耗时，主要用于 API 来源。
+  final int? durationMillis;
+
+  /// HTTP 状态码，主要用于 API 来源。
+  final int? statusCode;
+
+  /// 去掉 query/fragment 后的 URL，避免日志中包含敏感参数。
+  final String? normalizedUrl;
+
+  /// 附加说明，例如 error message、inbound/outbound、countOnly 原因。
+  final String? note;
+
+  int get totalBytes => uploadBytes + downloadBytes;
+
+  /// 当前事件 JSON 编码后的近似大小，用于控制诊断缓存内存上限。
+  int get estimatedBytes {
+    return utf8.encode(jsonEncode(toJson())).length;
+  }
+
+  Map<String, dynamic> toJson() {
+    final json = <String, dynamic>{
+      'timestampMillis': timestampMillis,
+      'bucket': bucket.name,
+      'label': label,
+      'host': host,
+      'source': source,
+      'uploadBytes': uploadBytes,
+      'downloadBytes': downloadBytes,
+      'totalBytes': totalBytes,
+      'accuracy': accuracy.name,
+      'requestCount': requestCount,
+      'failureCount': failureCount,
+      'retryCount': retryCount,
+      'rapidRepeatCount': rapidRepeatCount,
+      'cacheHitCount': cacheHitCount,
+      'cacheMissCount': cacheMissCount,
+      'responseFieldCount': responseFieldCount,
+    };
+    final duration = durationMillis;
+    if (duration != null) {
+      json['durationMillis'] = duration;
+    }
+    final status = statusCode;
+    if (status != null) {
+      json['statusCode'] = status;
+    }
+    final url = normalizedUrl;
+    if (url != null && url.isNotEmpty) {
+      json['normalizedUrl'] = url;
+    }
+    final noteText = note;
+    if (noteText != null && noteText.isNotEmpty) {
+      json['note'] = noteText;
+    }
+    return json;
+  }
+}
+
 /// 落盘调度配置。
 /// 用于声明宿主侧的落盘回调和定时落盘间隔。
 class TrafficStatsPersistenceConfig {
@@ -461,8 +666,15 @@ class TrafficStatsStore extends ChangeNotifier {
   /// 记录每个接口最近一次请求时间，用于识别短时间重复请求。
   final Map<String, DateTime> _lastApiRequestAt = <String, DateTime>{};
 
+  /// 诊断态专用的接口最近请求时间，避免诊断开启时污染原累计统计状态。
+  final Map<String, DateTime> _lastDiagnosisApiRequestAt = <String, DateTime>{};
+
   /// 记录 RTC 房间最近一次累计收发字节数，用于计算增量。
   final Map<String, ({int tx, int rx})> _rtcTotals =
+      <String, ({int tx, int rx})>{};
+
+  /// 诊断态专用的 RTC 累计计数，用于在原统计关闭时仍能计算诊断 delta。
+  final Map<String, ({int tx, int rx})> _diagnosisRtcTotals =
       <String, ({int tx, int rx})>{};
 
   /// 宿主侧提供的落盘配置。
@@ -494,6 +706,16 @@ class TrafficStatsStore extends ChangeNotifier {
 
   /// 当前上报配额所属的自然日。
   DateTime? _reportQuotaDay;
+
+  /// 当前诊断采集配置；为空表示不保留事件级明细。
+  TrafficStatsDiagnosisConfig? _diagnosisConfig;
+
+  /// 诊断态事件 ring buffer，只在 `_diagnosisConfig.enabled` 时追加。
+  final List<_TrafficDiagnosisEvent> _diagnosisEvents =
+      <_TrafficDiagnosisEvent>[];
+
+  /// ring buffer 当前估算字节数，用于控制诊断态内存占用。
+  int _diagnosisCacheBytes = 0;
 
   /// 当前自然日内已经成功上报的次数。
   int _reportCountToday = 0;
@@ -648,6 +870,104 @@ class TrafficStatsStore extends ChangeNotifier {
     _reportingTimer = Timer.periodic(
       config.interval,
       (_) => unawaited(reportNow(trigger: TrafficStatsReportTrigger.scheduled)),
+    );
+  }
+
+  /// 配置诊断事件采集。
+  ///
+  /// 每次配置都会先清空旧诊断事件，避免不同用户或不同 session 的数据混在一起。
+  void configureDiagnosis(TrafficStatsDiagnosisConfig? config) {
+    clearDiagnosis();
+    _diagnosisConfig = config;
+  }
+
+  /// 清空诊断事件缓存，不影响原有累计统计项。
+  void clearDiagnosis() {
+    _diagnosisEvents.clear();
+    _lastDiagnosisApiRequestAt.clear();
+    _diagnosisRtcTotals.clear();
+    _diagnosisCacheBytes = 0;
+  }
+
+  /// 生成指定时间窗口内的诊断聚合快照。
+  ///
+  /// 这里不读取原有累计 snapshot，而是只聚合 `_diagnosisEvents`，
+  /// 因此可以回答“最近半小时哪些来源流量最大”。
+  TrafficStatsDiagnosisSnapshot diagnosisSnapshotBetween({
+    required DateTime startTime,
+    required DateTime endTime,
+    int topN = 50,
+  }) {
+    final startMillis = startTime.millisecondsSinceEpoch;
+    final endMillis = endTime.millisecondsSinceEpoch;
+    final events = _diagnosisEvents.where((event) {
+      return event.timestampMillis >= startMillis &&
+          event.timestampMillis <= endMillis;
+    }).toList();
+    final totals = <String, dynamic>{
+      'uploadBytes': 0,
+      'downloadBytes': 0,
+      'totalBytes': 0,
+      'requestCount': 0,
+      'failureCount': 0,
+      'retryCount': 0,
+      'rapidRepeatCount': 0,
+      'cacheHitCount': 0,
+      'cacheMissCount': 0,
+      'responseFieldCount': 0,
+    };
+    final byBucket = <String, Map<String, dynamic>>{};
+    final byItem = <String, Map<String, dynamic>>{};
+    for (final event in events) {
+      _mergeDiagnosisTotals(totals, event);
+      // 先按 bucket 汇总，方便判断 API、资源、RTC 等大类占比。
+      final bucket = byBucket.putIfAbsent(
+        event.bucket.name,
+        _emptyDiagnosisTotals,
+      );
+      _mergeDiagnosisTotals(bucket, event);
+      final key = '${event.bucket.name}|${event.host}|${event.label}';
+      // 再按 bucket + host + label 聚合成可排查的具体来源。
+      final item = byItem.putIfAbsent(key, () {
+        return <String, dynamic>{
+          'bucket': event.bucket.name,
+          'label': event.label,
+          'host': event.host,
+          'source': event.source,
+          'uploadBytes': 0,
+          'downloadBytes': 0,
+          'totalBytes': 0,
+          'requestCount': 0,
+          'failureCount': 0,
+          'retryCount': 0,
+          'rapidRepeatCount': 0,
+          'cacheHitCount': 0,
+          'cacheMissCount': 0,
+          'responseFieldCount': 0,
+          'maxDurationMillis': 0,
+          'maxResponseBytes': 0,
+          'accuracy': event.accuracy.name,
+          'reasonHints': <String>[],
+        };
+      });
+      _mergeDiagnosisItem(item, event);
+    }
+    final topItems = byItem.values.toList();
+    // 按总流量降序输出，报告第一页就能看到最可能的问题来源。
+    topItems.sort(
+        (a, b) => (b['totalBytes'] as int).compareTo(a['totalBytes'] as int));
+    for (var i = 0; i < topItems.length; i++) {
+      topItems[i]['rank'] = i + 1;
+      topItems[i]['reasonHints'] = _reasonHints(topItems[i]);
+    }
+    return TrafficStatsDiagnosisSnapshot(
+      startTime: startTime,
+      endTime: endTime,
+      generatedAt: _now(),
+      totals: totals,
+      byBucket: byBucket,
+      topItems: topItems.take(topN).toList(),
+      eventsCount: events.length,
     );
   }
 
@@ -867,65 +1187,168 @@ class TrafficStatsStore extends ChangeNotifier {
   /// Records one HTTP request and estimates its uploaded bytes.
   /// 记录一次 HTTP 请求，并估算其上行字节数。
   void recordHttpRequest(RequestOptions options) {
-    if (!_enabled) {
+    final canRecordStats = _enabled;
+    final canRecordDiagnosis = _canRecordDiagnosis();
+    if (!canRecordStats && !canRecordDiagnosis) {
       return;
     }
-    final aggregate = _aggregateForHttp(options);
-    aggregate.requestCount += 1;
-    aggregate.occurrenceCount += 1;
-    aggregate.uploadBytes += estimateRequestBytes(options);
-    aggregate.accuracy = TrafficAccuracy.estimated;
 
     final isRetry = options.extra[_requestSeenKey] == true;
-    if (isRetry) {
-      aggregate.retryCount += 1;
-    }
     options.extra[_requestSeenKey] = true;
-
-    final lastRequestAt = _lastApiRequestAt[aggregate.label];
     final now = DateTime.now();
-    if (lastRequestAt != null &&
-        now.difference(lastRequestAt) <= const Duration(seconds: 5) &&
-        !isRetry) {
-      aggregate.rapidRepeatCount += 1;
-    }
-    _lastApiRequestAt[aggregate.label] = now;
 
-    notifyListeners();
-    _markDirty();
+    if (canRecordStats) {
+      final aggregate = _aggregateForHttp(options);
+      aggregate.requestCount += 1;
+      aggregate.occurrenceCount += 1;
+      aggregate.uploadBytes += estimateRequestBytes(options);
+      aggregate.accuracy = TrafficAccuracy.estimated;
+      if (isRetry) {
+        aggregate.retryCount += 1;
+      }
+
+      final lastRequestAt = _lastApiRequestAt[aggregate.label];
+      if (lastRequestAt != null &&
+          now.difference(lastRequestAt) <= const Duration(seconds: 5) &&
+          !isRetry) {
+        aggregate.rapidRepeatCount += 1;
+      }
+      _lastApiRequestAt[aggregate.label] = now;
+      notifyListeners();
+      _markDirty();
+    }
+
+    if (canRecordDiagnosis) {
+      final label = '${options.method.toUpperCase()} ${options.path}';
+      final host = _hostFromUrl(options.baseUrl);
+      final lastRequestAt = _lastDiagnosisApiRequestAt[label];
+      final rapidRepeat = lastRequestAt != null &&
+          now.difference(lastRequestAt) <= const Duration(seconds: 5) &&
+          !isRetry;
+      _lastDiagnosisApiRequestAt[label] = now;
+      if (rapidRepeat) {
+        // 单独记录快速重复请求，便于诊断报告提示 repeat_request。
+        _appendDiagnosisEvent(
+          _TrafficDiagnosisEvent(
+            timestampMillis: now.millisecondsSinceEpoch,
+            bucket: TrafficBucket.api,
+            label: label,
+            host: host,
+            accuracy: TrafficAccuracy.estimated,
+            source: 'dio',
+            rapidRepeatCount: 1,
+          ),
+        );
+      }
+      // 记录请求侧诊断事件，只保存估算上行字节和 path，不保存 headers/body。
+      _appendDiagnosisEvent(
+        _TrafficDiagnosisEvent(
+          timestampMillis: now.millisecondsSinceEpoch,
+          bucket: TrafficBucket.api,
+          label: label,
+          host: host,
+          accuracy: TrafficAccuracy.estimated,
+          source: 'dio',
+          uploadBytes: estimateRequestBytes(options),
+          requestCount: 1,
+          retryCount: isRetry ? 1 : 0,
+          normalizedUrl: options.path,
+        ),
+      );
+    }
   }
 
   /// Records one HTTP response, including estimated download bytes and field stats.
   /// 记录一次 HTTP 响应，并统计估算下行字节数和字段信息。
   void recordHttpResponse(Response response, {required bool success}) {
-    if (!_enabled) {
+    final canRecordStats = _enabled;
+    final canRecordDiagnosis = _canRecordDiagnosis();
+    if (!canRecordStats && !canRecordDiagnosis) {
       return;
     }
-    final aggregate = _aggregateForHttp(response.requestOptions);
-    aggregate.downloadBytes += estimateResponseBytes(response);
-    _mergeFieldStats(aggregate, analyzeFields(response.data));
-    if (!success) {
-      aggregate.failureCount += 1;
+    if (canRecordStats) {
+      final aggregate = _aggregateForHttp(response.requestOptions);
+      aggregate.downloadBytes += estimateResponseBytes(response);
+      _mergeFieldStats(aggregate, analyzeFields(response.data));
+      if (!success) {
+        aggregate.failureCount += 1;
+      }
+      notifyListeners();
+      _markDirty();
+    }
+    if (canRecordDiagnosis) {
+      final startTime = response.requestOptions.headers['startTime'];
+      final now = _now();
+      // 记录响应侧诊断事件，用状态码、耗时、响应大小和字段数定位大响应或慢接口。
+      _appendDiagnosisEvent(
+        _TrafficDiagnosisEvent(
+          timestampMillis: now.millisecondsSinceEpoch,
+          bucket: TrafficBucket.api,
+          label:
+              '${response.requestOptions.method.toUpperCase()} ${response.requestOptions.path}',
+          host: _hostFromUrl(response.requestOptions.baseUrl),
+          accuracy: TrafficAccuracy.estimated,
+          source: 'dio',
+          downloadBytes: estimateResponseBytes(response),
+          failureCount: success ? 0 : 1,
+          responseFieldCount:
+              TrafficStatsStore.analyzeFields(response.data).totalFieldCount,
+          durationMillis:
+              startTime is int ? now.millisecondsSinceEpoch - startTime : null,
+          statusCode: response.statusCode,
+          normalizedUrl: response.requestOptions.path,
+        ),
+      );
     }
     response.requestOptions.extra[_responseRecordedKey] = true;
-    notifyListeners();
-    _markDirty();
   }
 
   /// Records a failed HTTP request and merges response data when available.
   /// 记录一次失败的 HTTP 请求；如果有响应数据也一并合并统计。
   void recordHttpError(DioException error) {
-    if (!_enabled) {
+    final canRecordStats = _enabled;
+    final canRecordDiagnosis = _canRecordDiagnosis();
+    if (!canRecordStats && !canRecordDiagnosis) {
       return;
     }
-    final aggregate = _aggregateForHttp(error.requestOptions);
-    if (!wasResponseRecorded(error.requestOptions) && error.response != null) {
-      aggregate.downloadBytes += estimateResponseBytes(error.response!);
-      _mergeFieldStats(aggregate, analyzeFields(error.response!.data));
+    if (canRecordStats) {
+      final aggregate = _aggregateForHttp(error.requestOptions);
+      if (!wasResponseRecorded(error.requestOptions) &&
+          error.response != null) {
+        aggregate.downloadBytes += estimateResponseBytes(error.response!);
+        _mergeFieldStats(aggregate, analyzeFields(error.response!.data));
+      }
+      aggregate.failureCount += 1;
+      notifyListeners();
+      _markDirty();
     }
-    aggregate.failureCount += 1;
-    notifyListeners();
-    _markDirty();
+    if (canRecordDiagnosis) {
+      final response = error.response;
+      final startTime = error.requestOptions.headers['startTime'];
+      final now = _now();
+      // 错误也进入诊断明细，帮助识别失败重试导致的额外流量。
+      _appendDiagnosisEvent(
+        _TrafficDiagnosisEvent(
+          timestampMillis: now.millisecondsSinceEpoch,
+          bucket: TrafficBucket.api,
+          label:
+              '${error.requestOptions.method.toUpperCase()} ${error.requestOptions.path}',
+          host: _hostFromUrl(error.requestOptions.baseUrl),
+          accuracy: TrafficAccuracy.estimated,
+          source: 'dio',
+          downloadBytes: response == null ? 0 : estimateResponseBytes(response),
+          failureCount: 1,
+          responseFieldCount: response == null
+              ? 0
+              : TrafficStatsStore.analyzeFields(response.data).totalFieldCount,
+          durationMillis:
+              startTime is int ? now.millisecondsSinceEpoch - startTime : null,
+          statusCode: response?.statusCode,
+          normalizedUrl: error.requestOptions.path,
+          note: error.message,
+        ),
+      );
+    }
   }
 
   /// Records a download with explicit byte size information.
@@ -938,22 +1361,43 @@ class TrafficStatsStore extends ChangeNotifier {
     String? label,
     String? note,
   }) {
-    if (!_enabled) {
+    final canRecordStats = _enabled;
+    final canRecordDiagnosis = _canRecordDiagnosis();
+    if (!canRecordStats && !canRecordDiagnosis) {
       return;
     }
-    final aggregate = _aggregate(
-      bucket: bucket,
-      label: label ?? url,
-      host: _hostFromUrl(url),
-      accuracy: accuracy,
-    );
-    aggregate.downloadBytes += bytes;
-    aggregate.requestCount += 1;
-    aggregate.occurrenceCount += 1;
-    aggregate.note = note ?? aggregate.note;
-    aggregate.remoteUrl = url;
-    notifyListeners();
-    _markDirty();
+    if (canRecordStats) {
+      final aggregate = _aggregate(
+        bucket: bucket,
+        label: label ?? url,
+        host: _hostFromUrl(url),
+        accuracy: accuracy,
+      );
+      aggregate.downloadBytes += bytes;
+      aggregate.requestCount += 1;
+      aggregate.occurrenceCount += 1;
+      aggregate.note = note ?? aggregate.note;
+      aggregate.remoteUrl = url;
+      notifyListeners();
+      _markDirty();
+    }
+    if (canRecordDiagnosis) {
+      // 资源下载记录归一化 URL，去掉 query 后仍能定位 CDN/文件类型。
+      _appendDiagnosisEvent(
+        _TrafficDiagnosisEvent(
+          timestampMillis: _now().millisecondsSinceEpoch,
+          bucket: bucket,
+          label: label ?? _normalizeUrl(url),
+          host: _hostFromUrl(url),
+          accuracy: accuracy,
+          source: 'download',
+          downloadBytes: bytes,
+          requestCount: 1,
+          normalizedUrl: _normalizeUrl(url),
+          note: note,
+        ),
+      );
+    }
   }
 
   /// Records an upload with explicit byte size information.
@@ -966,21 +1410,41 @@ class TrafficStatsStore extends ChangeNotifier {
     String? host,
     String? note,
   }) {
-    if (!_enabled) {
+    final canRecordStats = _enabled;
+    final canRecordDiagnosis = _canRecordDiagnosis();
+    if (!canRecordStats && !canRecordDiagnosis) {
       return;
     }
-    final aggregate = _aggregate(
-      bucket: bucket,
-      label: label,
-      host: host ?? '',
-      accuracy: accuracy,
-    );
-    aggregate.uploadBytes += bytes;
-    aggregate.requestCount += 1;
-    aggregate.occurrenceCount += 1;
-    aggregate.note = note ?? aggregate.note;
-    notifyListeners();
-    _markDirty();
+    if (canRecordStats) {
+      final aggregate = _aggregate(
+        bucket: bucket,
+        label: label,
+        host: host ?? '',
+        accuracy: accuracy,
+      );
+      aggregate.uploadBytes += bytes;
+      aggregate.requestCount += 1;
+      aggregate.occurrenceCount += 1;
+      aggregate.note = note ?? aggregate.note;
+      notifyListeners();
+      _markDirty();
+    }
+    if (canRecordDiagnosis) {
+      // 上传仅记录 label 和字节数，不记录本地文件路径或敏感文件名。
+      _appendDiagnosisEvent(
+        _TrafficDiagnosisEvent(
+          timestampMillis: _now().millisecondsSinceEpoch,
+          bucket: bucket,
+          label: label,
+          host: host ?? '',
+          accuracy: accuracy,
+          source: 'upload',
+          uploadBytes: bytes,
+          requestCount: 1,
+          note: note,
+        ),
+      );
+    }
   }
 
   /// Records one cache hit for the specified traffic item.
@@ -990,19 +1454,37 @@ class TrafficStatsStore extends ChangeNotifier {
     required String label,
     String host = '',
   }) {
-    if (!_enabled) {
+    final canRecordStats = _enabled;
+    final canRecordDiagnosis = _canRecordDiagnosis();
+    if (!canRecordStats && !canRecordDiagnosis) {
       return;
     }
-    final aggregate = _aggregate(
-      bucket: bucket,
-      label: label,
-      host: host,
-      accuracy: TrafficAccuracy.exact,
-    );
-    aggregate.cacheHitCount += 1;
-    aggregate.occurrenceCount += 1;
-    notifyListeners();
-    _markDirty();
+    if (canRecordStats) {
+      final aggregate = _aggregate(
+        bucket: bucket,
+        label: label,
+        host: host,
+        accuracy: TrafficAccuracy.exact,
+      );
+      aggregate.cacheHitCount += 1;
+      aggregate.occurrenceCount += 1;
+      notifyListeners();
+      _markDirty();
+    }
+    if (canRecordDiagnosis) {
+      // 缓存命中/未命中单独记录，报告中可以识别 cache_miss_burst。
+      _appendDiagnosisEvent(
+        _TrafficDiagnosisEvent(
+          timestampMillis: _now().millisecondsSinceEpoch,
+          bucket: bucket,
+          label: label,
+          host: host,
+          accuracy: TrafficAccuracy.exact,
+          source: 'cache',
+          cacheHitCount: 1,
+        ),
+      );
+    }
   }
 
   /// Records one cache miss for the specified traffic item.
@@ -1012,19 +1494,37 @@ class TrafficStatsStore extends ChangeNotifier {
     required String label,
     String host = '',
   }) {
-    if (!_enabled) {
+    final canRecordStats = _enabled;
+    final canRecordDiagnosis = _canRecordDiagnosis();
+    if (!canRecordStats && !canRecordDiagnosis) {
       return;
     }
-    final aggregate = _aggregate(
-      bucket: bucket,
-      label: label,
-      host: host,
-      accuracy: TrafficAccuracy.exact,
-    );
-    aggregate.cacheMissCount += 1;
-    aggregate.occurrenceCount += 1;
-    notifyListeners();
-    _markDirty();
+    if (canRecordStats) {
+      final aggregate = _aggregate(
+        bucket: bucket,
+        label: label,
+        host: host,
+        accuracy: TrafficAccuracy.exact,
+      );
+      aggregate.cacheMissCount += 1;
+      aggregate.occurrenceCount += 1;
+      notifyListeners();
+      _markDirty();
+    }
+    if (canRecordDiagnosis) {
+      // 缓存未命中会和下载事件一起解释资源流量突增原因。
+      _appendDiagnosisEvent(
+        _TrafficDiagnosisEvent(
+          timestampMillis: _now().millisecondsSinceEpoch,
+          bucket: bucket,
+          label: label,
+          host: host,
+          accuracy: TrafficAccuracy.exact,
+          source: 'cache',
+          cacheMissCount: 1,
+        ),
+      );
+    }
   }
 
   /// Records one WebSocket message and attributes bytes by direction.
@@ -1035,25 +1535,48 @@ class TrafficStatsStore extends ChangeNotifier {
     required bool inbound,
     Object? payload,
   }) {
-    if (!_enabled) {
+    final canRecordStats = _enabled;
+    final canRecordDiagnosis = _canRecordDiagnosis();
+    if (!canRecordStats && !canRecordDiagnosis) {
       return;
     }
-    final aggregate = _aggregate(
-      bucket: TrafficBucket.webSocket,
-      label: channel,
-      host: '',
-      accuracy: TrafficAccuracy.exact,
-    );
-    aggregate.requestCount += 1;
-    aggregate.occurrenceCount += 1;
-    if (inbound) {
-      aggregate.downloadBytes += bytes;
-    } else {
-      aggregate.uploadBytes += bytes;
+    final fieldStats = analyzeFields(payload);
+    if (canRecordStats) {
+      final aggregate = _aggregate(
+        bucket: TrafficBucket.webSocket,
+        label: channel,
+        host: '',
+        accuracy: TrafficAccuracy.exact,
+      );
+      aggregate.requestCount += 1;
+      aggregate.occurrenceCount += 1;
+      if (inbound) {
+        aggregate.downloadBytes += bytes;
+      } else {
+        aggregate.uploadBytes += bytes;
+      }
+      _mergeFieldStats(aggregate, fieldStats);
+      notifyListeners();
+      _markDirty();
     }
-    _mergeFieldStats(aggregate, analyzeFields(payload));
-    notifyListeners();
-    _markDirty();
+    if (canRecordDiagnosis) {
+      // 长连按方向记录消息字节数，payload 只参与字段计数，不落完整内容。
+      _appendDiagnosisEvent(
+        _TrafficDiagnosisEvent(
+          timestampMillis: _now().millisecondsSinceEpoch,
+          bucket: TrafficBucket.webSocket,
+          label: channel,
+          host: '',
+          accuracy: TrafficAccuracy.exact,
+          source: 'webSocket',
+          uploadBytes: inbound ? 0 : bytes,
+          downloadBytes: inbound ? bytes : 0,
+          requestCount: 1,
+          responseFieldCount: fieldStats.totalFieldCount,
+          note: inbound ? 'inbound' : 'outbound',
+        ),
+      );
+    }
   }
 
   /// Records short-video playback as count-only because native byte stats are unavailable.
@@ -1077,21 +1600,41 @@ class TrafficStatsStore extends ChangeNotifier {
     String? remoteUrl,
     String? note,
   }) {
-    if (!_enabled) {
+    final canRecordStats = _enabled;
+    final canRecordDiagnosis = _canRecordDiagnosis();
+    if (!canRecordStats && !canRecordDiagnosis) {
       return;
     }
-    final aggregate = _aggregate(
-      bucket: bucket,
-      label: label,
-      host: host,
-      accuracy: TrafficAccuracy.countOnly,
-    );
-    aggregate.occurrenceCount += 1;
-    aggregate.requestCount += 1;
-    aggregate.note = note ?? aggregate.note;
-    aggregate.remoteUrl = remoteUrl ?? aggregate.remoteUrl;
-    notifyListeners();
-    _markDirty();
+    if (canRecordStats) {
+      final aggregate = _aggregate(
+        bucket: bucket,
+        label: label,
+        host: host,
+        accuracy: TrafficAccuracy.countOnly,
+      );
+      aggregate.occurrenceCount += 1;
+      aggregate.requestCount += 1;
+      aggregate.note = note ?? aggregate.note;
+      aggregate.remoteUrl = remoteUrl ?? aggregate.remoteUrl;
+      notifyListeners();
+      _markDirty();
+    }
+    if (canRecordDiagnosis) {
+      // 无法拿到真实字节的来源仍记录次数，避免诊断报告完全看不到该行为。
+      _appendDiagnosisEvent(
+        _TrafficDiagnosisEvent(
+          timestampMillis: _now().millisecondsSinceEpoch,
+          bucket: bucket,
+          label: label,
+          host: host,
+          accuracy: TrafficAccuracy.countOnly,
+          source: 'countOnly',
+          requestCount: 1,
+          normalizedUrl: remoteUrl == null ? null : _normalizeUrl(remoteUrl),
+          note: note,
+        ),
+      );
+    }
   }
 
   /// Records RTC traffic using cumulative SDK counters and stores only positive deltas.
@@ -1101,30 +1644,58 @@ class TrafficStatsStore extends ChangeNotifier {
     required int txBytes,
     required int rxBytes,
   }) {
-    if (!_enabled) {
+    final canRecordStats = _enabled;
+    final canRecordDiagnosis = _canRecordDiagnosis();
+    if (!canRecordStats && !canRecordDiagnosis) {
       return;
     }
-    final previous = _rtcTotals[roomId];
-    final deltaTx = previous == null ? txBytes : txBytes - previous.tx;
-    final deltaRx = previous == null ? rxBytes : rxBytes - previous.rx;
-    _rtcTotals[roomId] = (tx: txBytes, rx: rxBytes);
+    if (canRecordStats) {
+      final previous = _rtcTotals[roomId];
+      final deltaTx = previous == null ? txBytes : txBytes - previous.tx;
+      final deltaRx = previous == null ? rxBytes : rxBytes - previous.rx;
+      _rtcTotals[roomId] = (tx: txBytes, rx: rxBytes);
 
-    final aggregate = _aggregate(
-      bucket: TrafficBucket.rtcAudio,
-      label: roomId.isEmpty ? 'global-room' : roomId,
-      host: 'agora',
-      accuracy: TrafficAccuracy.exact,
-    );
-    if (deltaTx > 0) {
-      aggregate.uploadBytes += deltaTx;
+      final aggregate = _aggregate(
+        bucket: TrafficBucket.rtcAudio,
+        label: roomId.isEmpty ? 'global-room' : roomId,
+        host: 'agora',
+        accuracy: TrafficAccuracy.exact,
+      );
+      if (deltaTx > 0) {
+        aggregate.uploadBytes += deltaTx;
+      }
+      if (deltaRx > 0) {
+        aggregate.downloadBytes += deltaRx;
+      }
+      aggregate.requestCount += 1;
+      aggregate.occurrenceCount += 1;
+      notifyListeners();
+      _markDirty();
     }
-    if (deltaRx > 0) {
-      aggregate.downloadBytes += deltaRx;
+    if (canRecordDiagnosis) {
+      final previous = _diagnosisRtcTotals[roomId];
+      _diagnosisRtcTotals[roomId] = (tx: txBytes, rx: rxBytes);
+      if (previous == null) {
+        // 诊断可能在房间中途开启；第一次采样只作为基准，避免把开启前累计流量算进诊断窗口。
+        return;
+      }
+      final deltaTx = txBytes - previous.tx;
+      final deltaRx = rxBytes - previous.rx;
+      // RTC SDK 给的是累计计数，这里记录正向 delta，归因到房间 ID。
+      _appendDiagnosisEvent(
+        _TrafficDiagnosisEvent(
+          timestampMillis: _now().millisecondsSinceEpoch,
+          bucket: TrafficBucket.rtcAudio,
+          label: roomId.isEmpty ? 'global-room' : roomId,
+          host: 'agora',
+          accuracy: TrafficAccuracy.exact,
+          source: 'rtc',
+          uploadBytes: deltaTx > 0 ? deltaTx : 0,
+          downloadBytes: deltaRx > 0 ? deltaRx : 0,
+          requestCount: 1,
+        ),
+      );
     }
-    aggregate.requestCount += 1;
-    aggregate.occurrenceCount += 1;
-    notifyListeners();
-    _markDirty();
   }
 
   /// Estimates request size from URL, headers, and request payload.
@@ -1291,6 +1862,116 @@ class TrafficStatsStore extends ChangeNotifier {
     return current;
   }
 
+  void _appendDiagnosisEvent(_TrafficDiagnosisEvent event) {
+    final config = _diagnosisConfig;
+    if (config == null || !config.enabled) {
+      return;
+    }
+    if (event.timestampMillis < config.startedAt.millisecondsSinceEpoch ||
+        event.timestampMillis > config.expiresAt.millisecondsSinceEpoch) {
+      return;
+    }
+    _diagnosisEvents.add(event);
+    _diagnosisCacheBytes += event.estimatedBytes;
+    final maxEvents = config.maxEvents <= 0 ? 5000 : config.maxEvents;
+    final maxCacheBytes =
+        config.maxCacheBytes <= 0 ? 1024 * 1024 : config.maxCacheBytes;
+    // 诊断态只保留最近一段明细；按事件数和估算字节数双重限制内存占用。
+    while (_diagnosisEvents.length > maxEvents ||
+        _diagnosisCacheBytes > maxCacheBytes) {
+      final removed = _diagnosisEvents.removeAt(0);
+      _diagnosisCacheBytes -= removed.estimatedBytes;
+      if (_diagnosisCacheBytes < 0) {
+        _diagnosisCacheBytes = 0;
+      }
+    }
+  }
+
+  static Map<String, dynamic> _emptyDiagnosisTotals() {
+    return <String, dynamic>{
+      'uploadBytes': 0,
+      'downloadBytes': 0,
+      'totalBytes': 0,
+      'requestCount': 0,
+      'failureCount': 0,
+      'retryCount': 0,
+      'rapidRepeatCount': 0,
+      'cacheHitCount': 0,
+      'cacheMissCount': 0,
+      'responseFieldCount': 0,
+    };
+  }
+
+  static void _mergeDiagnosisTotals(
+    Map<String, dynamic> target,
+    _TrafficDiagnosisEvent event,
+  ) {
+    // 统一累加诊断事件里的排查指标，供 totals、byBucket、topItems 共用。
+    target['uploadBytes'] = (target['uploadBytes'] as int) + event.uploadBytes;
+    target['downloadBytes'] =
+        (target['downloadBytes'] as int) + event.downloadBytes;
+    target['totalBytes'] = (target['totalBytes'] as int) + event.totalBytes;
+    target['requestCount'] =
+        (target['requestCount'] as int) + event.requestCount;
+    target['failureCount'] =
+        (target['failureCount'] as int) + event.failureCount;
+    target['retryCount'] = (target['retryCount'] as int) + event.retryCount;
+    target['rapidRepeatCount'] =
+        (target['rapidRepeatCount'] as int) + event.rapidRepeatCount;
+    target['cacheHitCount'] =
+        (target['cacheHitCount'] as int) + event.cacheHitCount;
+    target['cacheMissCount'] =
+        (target['cacheMissCount'] as int) + event.cacheMissCount;
+    target['responseFieldCount'] =
+        (target['responseFieldCount'] as int) + event.responseFieldCount;
+  }
+
+  static void _mergeDiagnosisItem(
+    Map<String, dynamic> item,
+    _TrafficDiagnosisEvent event,
+  ) {
+    _mergeDiagnosisTotals(item, event);
+    final duration = event.durationMillis;
+    if (duration != null && duration > (item['maxDurationMillis'] as int)) {
+      item['maxDurationMillis'] = duration;
+    }
+    // maxResponseBytes 用于快速发现单次响应或下载特别大的来源。
+    if (event.downloadBytes > (item['maxResponseBytes'] as int)) {
+      item['maxResponseBytes'] = event.downloadBytes;
+    }
+    if (event.normalizedUrl != null) {
+      item['normalizedUrl'] = event.normalizedUrl;
+    }
+    if (event.note != null) {
+      item['note'] = event.note;
+    }
+  }
+
+  static List<String> _reasonHints(Map<String, dynamic> item) {
+    final hints = <String>[];
+    // 这些 hint 是给日志阅读者的初筛标签，不参与业务逻辑判断。
+    if ((item['downloadBytes'] as int) >= 1024 * 1024) {
+      hints.add('large_download');
+    }
+    if ((item['uploadBytes'] as int) >= 1024 * 1024) {
+      hints.add('large_upload');
+    }
+    if ((item['rapidRepeatCount'] as int) > 0) {
+      hints.add('repeat_request');
+    }
+    if ((item['failureCount'] as int) > 0 || (item['retryCount'] as int) > 0) {
+      hints.add('high_failure_retry');
+    }
+    if ((item['cacheMissCount'] as int) > 0 &&
+        (item['cacheHitCount'] as int) == 0) {
+      hints.add('cache_miss_burst');
+    }
+    if ((item['responseFieldCount'] as int) >= 1000) {
+      hints.add('large_response_shape');
+    }
+    return hints;
+  }
+
   void _markDirty() {
     _dirty = true;
   }
@@ -1374,6 +2055,16 @@ class TrafficStatsStore extends ChangeNotifier {
 
   static DateTime _dateOnly(DateTime value) {
     return DateTime(value.year, value.month, value.day);
+  }
+
+  bool _canRecordDiagnosis() {
+    final config = _diagnosisConfig;
+    if (config == null || !config.enabled) {
+      return false;
+    }
+    final now = _now();
+    // 只判断诊断窗口是否有效；原累计统计由各 record 方法单独判断 `_enabled`。
+    return !now.isBefore(config.startedAt) && !now.isAfter(config.expiresAt);
   }
 
   /// 将恢复出来的聚合项合并到现有聚合项中。
@@ -1507,6 +2198,19 @@ class TrafficStatsStore extends ChangeNotifier {
       return Uri.parse(value).host;
     } catch (_) {
       return '';
+    }
+  }
+
+  static String _normalizeUrl(String value) {
+    try {
+      final uri = Uri.parse(value);
+      if (uri.host.isEmpty) {
+        return value;
+      }
+      // 去掉 query/fragment，降低日志泄露参数和 token 的风险。
+      return uri.replace(query: '', fragment: '').toString();
+    } catch (_) {
+      return value;
     }
   }
 }

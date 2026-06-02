@@ -11,6 +11,7 @@ void main() {
     store.setEnabled(true);
     store.configurePersistence(null);
     store.configureReporting(null);
+    store.configureDiagnosis(null);
     store.setAppVersion(null);
     store.debugSetNow(() => now);
     store.restoreFromSnapshot(store.snapshot());
@@ -287,5 +288,38 @@ void main() {
     expect(item.downloadBytes, 40);
     expect(item.requestCount, 1);
     expect(item.occurrenceCount, 1);
+  });
+
+  test('diagnosis rtc stats use first sample as baseline', () {
+    final startTime = now;
+    store.configureDiagnosis(
+      TrafficStatsDiagnosisConfig(
+        enabled: true,
+        startedAt: startTime,
+        expiresAt: startTime.add(const Duration(minutes: 1)),
+      ),
+    );
+
+    store.recordRtcStats(
+      roomId: 'room-1',
+      txBytes: 1000,
+      rxBytes: 2000,
+    );
+    now = now.add(const Duration(seconds: 1));
+    store.recordRtcStats(
+      roomId: 'room-1',
+      txBytes: 1300,
+      rxBytes: 2600,
+    );
+
+    final snapshot = store.diagnosisSnapshotBetween(
+      startTime: startTime,
+      endTime: now,
+    );
+
+    expect(snapshot.totals['uploadBytes'], 300);
+    expect(snapshot.totals['downloadBytes'], 600);
+    expect(snapshot.totals['totalBytes'], 900);
+    expect(snapshot.eventsCount, 1);
   });
 }
